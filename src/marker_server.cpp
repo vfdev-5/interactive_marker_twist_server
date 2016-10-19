@@ -44,70 +44,84 @@ using visualization_msgs::InteractiveMarkerFeedback;
 
 class MarkerServer
 {
-  public:
-    MarkerServer()
-      : nh("~"), server("twist_marker_server")
+public:
+  MarkerServer()
+    : nh("~"), server("twist_marker_server")
+  {
+    std::string cmd_vel_topic;
+
+    nh.param<std::string>("link_name", link_name, "/base_link");
+    nh.param<std::string>("robot_name", robot_name, "robot");
+
+    if (nh.getParam("linear_scale", linear_drive_scale_map))
     {
-      std::string cmd_vel_topic;
-
-      nh.param<std::string>("link_name", link_name, "/base_link");
-      nh.param<std::string>("robot_name", robot_name, "robot");
-
-      if (nh.getParam("linear_scale", linear_drive_scale_map))
-      {
-        nh.getParam("linear_scale", linear_drive_scale_map);
-        nh.getParam("max_positive_linear_velocity", max_positive_linear_velocity_map);
-        nh.getParam("max_negative_linear_velocity", max_negative_linear_velocity_map);
-      }
-      else
-      {
-        nh.param<double>("linear_scale", linear_drive_scale_map["x"], 1.0);
-        nh.param<double>("max_positive_linear_velocity", max_positive_linear_velocity_map["x"],  1.0);
-        nh.param<double>("max_negative_linear_velocity", max_negative_linear_velocity_map["x"], -1.0);
-      }
-
-      nh.param<double>("angular_scale", angular_drive_scale, 2.2);
-      nh.param<double>("max_angular_velocity", max_angular_velocity, 2.2);
-      nh.param<double>("marker_size_scale", marker_size_scale, 1.0);
-
-      vel_pub = nh.advertise<geometry_msgs::Twist>("cmd_vel", 1);
-      createInteractiveMarkers();
-
-      ROS_INFO("[twist_marker_server] Initialized.");
+      nh.getParam("linear_scale", linear_drive_scale_map);
+      nh.getParam("max_positive_linear_velocity", max_positive_linear_velocity_map);
+      nh.getParam("max_negative_linear_velocity", max_negative_linear_velocity_map);
+    }
+    else
+    {
+      nh.param<double>("linear_scale", linear_drive_scale_map["x"], 1.0);
+      nh.param<double>("max_positive_linear_velocity", max_positive_linear_velocity_map["x"],  1.0);
+      nh.param<double>("max_negative_linear_velocity", max_negative_linear_velocity_map["x"], -1.0);
     }
 
-    void processFeedback(
-        const InteractiveMarkerFeedback::ConstPtr &feedback);
+    nh.param<double>("marker_size_scale", marker_size_scale, 1.0);
 
-  private:
-    void createInteractiveMarkers();
+    nh.param<bool>("is_ackermann", is_ackermann, false);
+    nh.param<double>("angular_scale", angular_drive_scale, 2.2);
 
-    ros::NodeHandle nh;
-    ros::Publisher vel_pub;
-    interactive_markers::InteractiveMarkerServer server;
+    if (!is_ackermann)
+    {
 
-    std::map<std::string, double> linear_drive_scale_map;
-    std::map<std::string, double> max_positive_linear_velocity_map;
-    std::map<std::string, double> max_negative_linear_velocity_map;
+      nh.param<double>("max_angular_velocity", max_angular_velocity, 2.2);
+      createInteractiveMarkers();
+    }
+    else
+    {
+      nh.param<double>("max_positive_angular_position", max_positive_angular_position, 1.0);
+      nh.param<double>("max_negative_angular_position", max_negative_angular_position, 1.0);
+      createAckermannInteractiveMarkers();
+    }
 
-    double angular_drive_scale;
-    double max_angular_velocity;
-    double marker_size_scale;
+    vel_pub = nh.advertise<geometry_msgs::Twist>("cmd_vel", 1);
 
-    std::string link_name;
-    std::string robot_name;
+    ROS_INFO("[twist_marker_server] Initialized.");
+  }
+
+  void processFeedback(
+      const InteractiveMarkerFeedback::ConstPtr &feedback);
+
+private:
+  void createInteractiveMarkers();
+  void createAckermannInteractiveMarkers();
+
+  ros::NodeHandle nh;
+  ros::Publisher vel_pub;
+  interactive_markers::InteractiveMarkerServer server;
+
+  std::map<std::string, double> linear_drive_scale_map;
+  std::map<std::string, double> max_positive_linear_velocity_map;
+  std::map<std::string, double> max_negative_linear_velocity_map;
+
+  double angular_drive_scale;
+  double max_angular_velocity;
+  double marker_size_scale;
+
+  std::string link_name;
+  std::string robot_name;
+
+  bool is_ackermann;
+  double max_positive_angular_position;
+  double max_negative_angular_position;
+
+
 };
 
 void MarkerServer::processFeedback(
     const InteractiveMarkerFeedback::ConstPtr &feedback )
 {
   geometry_msgs::Twist vel;
-
-  // Handle angular change (yaw is the only direction in which you can rotate)
-  double yaw = tf::getYaw(feedback->pose.orientation);
-  vel.angular.z = angular_drive_scale * yaw;
-  vel.angular.z = std::min(vel.angular.z,  max_angular_velocity);
-  vel.angular.z = std::max(vel.angular.z, -max_angular_velocity);
 
   if (linear_drive_scale_map.find("x") != linear_drive_scale_map.end())
   {
@@ -128,10 +142,51 @@ void MarkerServer::processFeedback(
     vel.linear.z = std::max(vel.linear.z, max_negative_linear_velocity_map["z"]);
   }
 
+  if (is_ackermann)
+  {
+    // Handle angular change (yaw is the only direction in which you can rotate)
+    double yaw = tf::getYaw(feedback->pose.orientation);
+    vel.angular.z = angular_drive_scale * yaw;
+    vel.angular.z = std::min(vel.angular.z, max_positive_angular_position);
+    vel.angular.z = std::max(vel.angular.z, max_negative_angular_position);
+  }
+  else
+  {
+    // Handle angular change (yaw is the only direction in which you can rotate)
+    double yaw = tf::getYaw(feedback->pose.orientation);
+    vel.angular.z = angular_drive_scale * yaw;
+    vel.angular.z = std::min(vel.angular.z,  max_angular_velocity);
+    vel.angular.z = std::max(vel.angular.z, -max_angular_velocity);
+  }
+
   vel_pub.publish(vel);
 
   // Make the marker snap back to robot
   server.setPose(robot_name + "_twist_marker", geometry_msgs::Pose());
+
+  server.applyChanges();
+}
+
+void MarkerServer::createAckermannInteractiveMarkers()
+{
+  // create an interactive marker for our server
+  InteractiveMarker int_marker;
+  int_marker.header.frame_id = link_name;
+  int_marker.name = robot_name + "_twist_marker";
+  int_marker.description = "twist controller for " + robot_name;
+  int_marker.scale = marker_size_scale;
+
+  InteractiveMarkerControl control;
+
+  control.orientation.w = 1;
+  control.orientation.x = 0;
+  control.orientation.y = 1;
+  control.orientation.z = 0;
+  control.name = "move_2d";
+  control.interaction_mode = InteractiveMarkerControl::MOVE_ROTATE;
+  int_marker.controls.push_back(control);
+
+  server.insert(int_marker, boost::bind(&MarkerServer::processFeedback, this, _1));
 
   server.applyChanges();
 }
