@@ -144,9 +144,10 @@ void MarkerServer::processFeedback(
 
   if (is_ackermann)
   {
+    double factor = vel.linear.x > 0 ? 1.0 : -1.0;
     // Handle angular change (yaw is the only direction in which you can rotate)
     double yaw = tf::getYaw(feedback->pose.orientation);
-    vel.angular.z = angular_drive_scale * yaw;
+    vel.angular.z = factor * angular_drive_scale * yaw;
     vel.angular.z = std::min(vel.angular.z, max_positive_angular_position);
     vel.angular.z = std::max(vel.angular.z, max_negative_angular_position);
   }
